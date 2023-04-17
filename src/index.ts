@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import FitParser from 'fit-file-parser-typescript'
-import {createCanvas, loadImage} from "canvas";
+import {createCanvas, loadImage, CanvasRenderingContext2D} from "canvas";
 
 const FIT_FILE = 'input/Tai_Mo_Shan_Mini_Trail_Recce.fit'
 const icons = {
@@ -14,11 +14,11 @@ const fitParser = new FitParser({
     lengthUnit: 'km',
     temperatureUnit: 'kelvin',
     elapsedRecordField: true,
-    mode: 'cascade',
+    mode: 'list',
 });
 
 async function main() {
-    const fit: any = await new Promise(async (resolve, reject) => {
+    const {records}: any = await new Promise(async (resolve, reject) => {
         fitParser.parse(await fs.readFileSync(FIT_FILE), (error, data) => {
             if (error) {
                 reject(error)
@@ -26,11 +26,6 @@ async function main() {
             resolve(data)
         })
     })
-    const records = fit.activity.sessions.reduce((pv1, cv1) => {
-        return [...pv1, ...cv1.laps.reduce((pv2, cv2) => {
-            return [...pv2, ...cv2.records]
-        }, [])]
-    }, [])
 
     const width = 1920
     const height = 1080
@@ -38,10 +33,33 @@ async function main() {
     const canvas = createCanvas(width, height)
     const ctx = canvas.getContext('2d')
 
+    const progressTime = new Date('2023-04-02T03:22:26.000Z')
+    await drawGpx({
+        ctx: ctx,
+        width: width,
+        height: height,
+        records: records,
+        progressTime: progressTime,
+    })
+
+    await fs.writeFileSync(OUTPUT_FILE, canvas.toBuffer())
+}
+
+async function drawGpx(props: {
+    ctx: CanvasRenderingContext2D;
+    width: number;
+    height: number;
+    records: any[];
+    progressTime: Date;
+}) {
+    const {ctx, width, height, records, progressTime} = props
+
+    // canvas position and size calculation
     const gpxWidth = width / 5
     const gpxHeight = height / 5
     const gpxOffsetX = width - gpxWidth - width / 24
     const gpxOffsetY = height / 24
+
     const {gpxMinX, gpxMaxX, gpxMinY, gpxMaxY} = records.reduce((pv, cv) => {
         const {position_lat: lat, position_long: long} = cv
         if (lat == null || long == null) {
@@ -59,11 +77,15 @@ async function main() {
         gpxMinY: 0,
         gpxMaxY: 0,
     })
+
     const gpxDiffX = gpxMaxX - gpxMinX
     const gpxDiffY = gpxMaxY - gpxMinY
     const gpxRatio = gpxDiffX > gpxDiffY ? gpxWidth / gpxDiffX : gpxHeight / gpxDiffY
 
-    const progressTime = new Date('2023-04-02T03:22:26.000Z')
+    const getXY = (lat: number, long: number) => ({
+        x: (long - gpxMinX) * gpxRatio + gpxOffsetX,
+        y: (gpxMaxY - lat) * gpxRatio + gpxOffsetY
+    })
 
     // draw background line
     ctx.beginPath()
@@ -73,8 +95,7 @@ async function main() {
         if (lat == null || long == null) {
             continue
         }
-        const x = (long - gpxMinX) * gpxRatio + gpxOffsetX
-        const y = (gpxMaxY - lat) * gpxRatio + gpxOffsetY
+        const {x, y} = getXY(lat, long)
         ctx.lineTo(x, y)
     }
     ctx.stroke()
@@ -85,14 +106,15 @@ async function main() {
     let x, y
     for (const each of records) {
         const {position_lat: lat, position_long: long} = each
-        if (lat == null || long == null) {
-            continue
-        }
         if (+each.timestamp > +progressTime) {
             break
         }
-        x = (long - gpxMinX) * gpxRatio + gpxOffsetX
-        y = (gpxMaxY - lat) * gpxRatio + gpxOffsetY
+        if (lat == null || long == null) {
+            continue
+        }
+        const xy = getXY(lat, long)
+        x = xy.x
+        y = xy.y
         ctx.lineTo(x, y)
     }
     ctx.stroke()
@@ -100,8 +122,6 @@ async function main() {
     // draw icon
     const iconWidth = width / 48
     ctx.drawImage(await loadImage(icons.RUN), x - iconWidth / 2, y - iconWidth / 2, iconWidth, iconWidth)
-
-    await fs.writeFileSync(OUTPUT_FILE, canvas.toBuffer())
 }
 
 void main()
