@@ -12,7 +12,6 @@ const fitParser = new FitParser({
     force: true,
     speedUnit: 'km/h',
     lengthUnit: 'km',
-    temperatureUnit: 'kelvin',
     elapsedRecordField: true,
     mode: 'list',
 });
